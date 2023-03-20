@@ -1,0 +1,173 @@
+---
+title: "Project 2"
+author: "Jared Ilg"
+date: "2023-03-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE}
+#Library
+library(e1071)
+library(klaR)
+library(nnet)
+library(neuralnet)
+library(MASS)
+library(rpart)
+library(randomForest)
+library(mlbench) #Includes BreastCancer data set. 
+library(caret)
+library(stringr)
+```
+
+```{r}
+data("BreastCancer")
+mydata <- cbind(BreastCancer[11],BreastCancer[2:10])
+```
+
+```{r}
+ 
+summary(mydata)
+str(mydata)
+
+for (i in 1:ncol(mydata)) {
+  mydata[is.na(mydata[,i]), i] <- floor(mean(as.numeric(mydata[,i]), na.rm = TRUE))
+}
+mydata$Malignant_1 <- ifelse(mydata$Class == "malignant",1,0)  #Set 
+mydata.num <- as.data.frame(apply(mydata[,2:11],2,as.numeric))
+mydata.num <- cbind(mydata.num[10],mydata.num[1:9]) 
+mydata <- mydata[,1:10]
+```
+
+
+```{r }
+
+t_index <- sample(c(1:dim(mydata)[1]), dim(mydata)[1]*.6) 
+train.df <- mydata[t_index, ]
+valid.df <- mydata[-t_index, ]
+```
+
+```{r }
+
+accuracy.df <- data.frame(Model = seq(1, 8,1), Train_Accuracy_score = rep(0,8) ,Valid_Accuracy_score = rep(0,8))
+```
+
+
+```{r }
+
+accuracy.df[1,1] <- "Support Vector Machines"
+bdsvm <- svm(Class~.,train.df)
+bdsvm.pred <- predict(bdsvm,train.df)
+accuracy.df[1,2] <-confusionMatrix(as.factor(bdsvm.pred), as.factor(train.df$Class))$overall[1]
+
+bdsvm.v.pred <- predict(bdsvm, valid.df)
+
+accuracy.df[1,3] <- confusionMatrix(as.factor(bdsvm.v.pred), as.factor(valid.df$Class))$overall[1]
+```
+
+```{r }
+#Naive Bays
+accuracy.df[2,1] <- "Naive Bays"
+bdnvb <-NaiveBayes(Class ~., train.df)
+bdnvb.pred <- predict(bdnvb, train.df)
+accuracy.df[2,2] <- confusionMatrix(as.factor(bdnvb.pred$class), as.factor(train.df$Class))$overall[1]
+
+bdnvb.v.pred <- predict(bdnvb, valid.df)
+
+accuracy.df[2,3] <- confusionMatrix(as.factor(bdnvb.v.pred$class), as.factor(valid.df$Class))$overall[1]
+```
+
+```{r }
+#Neural Net
+
+train.num.df <- mydata.num[t_index, ]
+valid.num.df <- mydata.num[-t_index, ]
+
+norm_values <- preProcess(train.num.df[,2:10])
+train.norm.df <- predict(norm_values, train.num.df)
+valid.norm.df <- predict(norm_values, valid.num.df)
+
+
+accuracy.df[3,1] <- "Neural Net"
+bdnnet <- neuralnet(Malignant_1 ~ .,linear.output = T, data = train.norm.df, hidden = c(2,5), rep = 5) 
+train.pred <- compute(bdnnet, train.norm.df)
+train.class <- ifelse(train.pred$net.result > .5, 1, 0)
+accuracy.df[3,2] <- confusionMatrix(as.factor(train.class), as.factor(train.num.df$Malignant_1))$overall[1]
+
+valid.pred <- compute(bdnnet, valid.norm.df)
+valid.class <- ifelse(valid.pred$net.result > .5, 1, 0)
+
+accuracy.df[3,3] <- confusionMatrix(as.factor(valid.class), as.factor(valid.norm.df$Malignant_1))$overall[1]
+```
+
+```{r}
+#Decision trees
+accuracy.df[4,1] <- "Decision Tree"
+bdtree <- rpart(Class~ ., train.df)
+
+bdtree.pred <- predict(bdtree, train.df, type = "class")
+bdtree.v.pred <- predict(bdtree, valid.df, type = "class")
+
+accuracy.df[4,2] <- confusionMatrix(as.factor(bdtree.pred), as.factor(train.df$Class))$overall[1]
+accuracy.df[4,3] <- confusionMatrix(bdtree.v.pred, valid.df$Class)$overall[1]
+```
+
+```{r  }
+
+accuracy.df[5,1] <- "Leave-1-Out Cross Validation (LOOCV)"
+ans <- numeric(length(as.numeric(valid.df[,1])))
+for (i in 1:length(valid.df[,1])) {
+  bdtree2 <- rpart(Class ~ ., valid.df[-i,])
+  bdtree2.pred <- predict(bdtree, valid.df[i,],type="class")
+  ans[i] <- bdtree2.pred
+}
+ans <- factor(ans,labels=levels(valid.df$Class))
+accuracy.df[5,3] <- confusionMatrix(as.factor(ans), as.factor(valid.df$Class))$overall[1]
+# The same as above in this case
+```
+
+```{r  } 
+accuracy.df[6,1] <- "Regularized Discriminant Analysis"
+bdrda <- rda(Class ~ ., train.df)
+bdrda.pred <- predict(bdrda, train.df)
+accuracy.df[6,2] <- confusionMatrix(as.factor(bdrda.pred$class), as.factor(train.df$Class))$overall[1]
+bdrda2 <- rda(Class ~ ., mydata)
+bdrda.v.pred <- predict(bdrda, valid.df)
+accuracy.df[6,3] <- confusionMatrix(as.factor(bdrda.v.pred$class), as.factor(valid.df$Class))$overall[1]
+```
+
+```{r Random Forests }
+#Random Forests
+accuracy.df[7,1] <- "Random Forests"
+bdrf <- randomForest(Class~., train.df, importance= TRUE)
+bdrf.pred <- predict(bdrf, train.df)
+accuracy.df[7,2] <- confusionMatrix(bdrf.pred, train.df$Class)$overall[1]
+# (Suspiciously correct! - need to read the manual)
+bdrf.v.pred <- predict(bdrf, valid.df)
+accuracy.df[7,3] <- confusionMatrix(as.factor(bdrf.v.pred), as.factor(valid.df$Class))$overall[1]
+```
+
+```{r}
+
+ensamble.df <- cbind(as.data.frame(bdsvm.v.pred)[1],as.data.frame(bdnvb.v.pred)[1],as.data.frame(valid.class)[1],as.data.frame(bdtree.v.pred)[1],as.data.frame(ans),as.data.frame(bdrda.v.pred)[1],as.data.frame(bdrf.v.pred)[1])
+colnames(ensamble.df) <-c("svm", "nvb", "nnet","dectree","LOOCV", "rda", "rf" )
+ 
+ensamble.df$svm <- ifelse(ensamble.df$svm == "malignant",1,0)
+ensamble.df$nvb <- ifelse(ensamble.df$nvb == "malignant",1,0)
+ensamble.df$dectree <- ifelse(ensamble.df$dectree =="malignant",1,0)
+ensamble.df$rda <- ifelse(ensamble.df$rda == "malignant",1,0)
+ensamble.df$LOOCV <- ifelse(ensamble.df$LOOCV =="malignant",1,0)
+ensamble.df$rf <- ifelse(ensamble.df$rf =="malignant",1,0)
+
+e <- as.matrix(ensamble.df)  
+ensamble.df$combo <- rowSums(e)
+
+ensamble.df$combo_class <- ifelse(ensamble.df$combo >=4,"malignant", "benign")
+
+accuracy.df[8,1] <- "Combo Score "
+accuracy.df[8,3] <- confusionMatrix(as.factor(ensamble.df$combo_class), as.factor(valid.df$Class))$overall[1]
+
+accuracy.df
